@@ -47,28 +47,53 @@ with WordSpecLike with Matchers with BeforeAndAfterAll {
       val numberOfDigits = limit.toString.length
       val formatString = s"%0${numberOfDigits}d"
 
-      val tuples: Stream[(Mat, BufferedImage)] = Stream
-        .from(1)
-        .map { frameNumber =>
-          val grabFrame: Frame = g.grabFrame()
-          val mat: Mat = x.convert(grabFrame)
-          val bufferedImage = Try(converter.convert(grabFrame)).toOption
 
-          (mat, bufferedImage)
+      case class Coordinate(x: Int, y: Int)
+      val coordinates = for (x <- 12.to(67);
+      y <- 187.to(642))
+      yield Coordinate(x, y)
+
+      var referenceColor: Option[Int] = None
+
+      1.to(numberOfFrames).foreach { framenumber =>
+
+        val grabFrame: Frame = g.grabFrame()
+
+        val bufferedImage = Try(converter.convert(grabFrame)).toOption
+
+        bufferedImage.foreach { image =>
+
+          if(referenceColor.isEmpty) {
+            referenceColor = Some(image.getRGB(12, 187))
+          }
+
+          val colors = coordinates.map(coord => image.getRGB(coord.x, coord.y))
+          val allSameAsReference = colors.forall(c => c == referenceColor.get)
+
+          if(!allSameAsReference) {
+            println(s"found match in $framenumber")
+          }
+        }
       }
-        .filter(_._2.isDefined)
-        .map(tuple => tuple.copy(_2 = tuple._2.get))
-        .take(limit)
 
+//      val tuples: Stream[Int] = Stream
+//        .from(1)
+//        .map { frameNumber =>
+//
+//
+//
+//        (bufferedImage)
+//        frameNumber
+//      }
+//        .filter(_._2.isDefined)
+//        .map(tuple => tuple.copy(_2 = tuple._2.get))
+//        .take(limit)
+//
+//      tuples.zipWithIndex.foreach { case ((mat, image), index) =>
+//          println(s"written image $index")
+//          ImageIO.write(image, "png", new File(s"/home/flwi/Pictures/threesmovement/${index.formatted(formatString)}.png"))
+//      }
       g.stop()
-
-
-      tuples.zipWithIndex.foreach { case ((mat, image), index) =>
-          println(s"written image $index")
-          ImageIO.write(image, "png", new File(s"/home/flwi/Pictures/threesmovement/${index.formatted(formatString)}.png"))
-      }
-
     }
   }
-
 }
