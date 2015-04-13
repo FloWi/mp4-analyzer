@@ -8,10 +8,29 @@ import javax.imageio.ImageIO
 import akka.actor.ActorSystem
 import akka.testkit.{ImplicitSender, TestKit}
 import org.bytedeco.javacv.OpenCVFrameConverter.ToMat
-import org.bytedeco.javacv.{FFmpegFrameGrabber, Java2DFrameConverter}
+import org.bytedeco.javacv.{FFmpegFrameGrabber, Frame, Java2DFrameConverter}
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
 
 import scala.util.Try
+
+
+case class Point(x: Int, y: Int)
+
+case class Size(width: Int, height: Int)
+
+object Rectangle {
+  def apply(start: Point, end: Point): Rectangle = {
+    val size = Size(end.x - start.x, end.y - start.y)
+    Rectangle(start, size)
+  }
+}
+
+case class Rectangle(topLeft: Point, size: Size) {
+
+  val coordinates = (for (y <- 0.until(size.height); x <- 0.until(size.width)) yield Point(topLeft.x + x, topLeft.y + y)).toVector
+}
+
+case class MatchArea(area: Rectangle, index: Int, direction: String)
 
 class PingPongActorSpec(_system: ActorSystem) extends TestKit(_system) with ImplicitSender
 with WordSpecLike with Matchers with BeforeAndAfterAll {
@@ -41,29 +60,27 @@ with WordSpecLike with Matchers with BeforeAndAfterAll {
       g.start()
       val numberOfFrames = g.getLengthInFrames
 
-      val limit: Int = 10000
-      val numberOfDigits = limit.toString.length
+      val numberOfDigits = numberOfFrames.toString.length
       val formatString = s"%0${numberOfDigits}d"
 
 
-      case class Coordinate(x: Int, y: Int)
       val fromLeftCoordinates = (for (x <- 62.to(75);
                                       y <- 183.to(638))
-        yield Coordinate(x, y)).toList
+        yield Point(x, y)).toList
 
       val fromRightCoordinates = (for (x <- 462.to(475);
                                        y <- 183.to(638))
-        yield Coordinate(x, y)).toList
+        yield Point(x, y)).toList
 
       val fromTopCoordinates = (for (x <- 98.to(440);
                                      y <- 143.to(154))
-        yield Coordinate(x, y)).toList
+        yield Point(x, y)).toList
 
       val fromBottomCoordinates = (for (x <- 98.to(440);
                                         y <- 667.to(680))
-        yield Coordinate(x, y)).toList
+        yield Point(x, y)).toList
 
-      case class CoordinatesAndDirection(coordinates: List[Coordinate], direction: String)
+      case class CoordinatesAndDirection(coordinates: List[Point], direction: String)
 
       val coordinates = List(
         CoordinatesAndDirection(fromLeftCoordinates, "left"),
@@ -72,23 +89,78 @@ with WordSpecLike with Matchers with BeforeAndAfterAll {
         CoordinatesAndDirection(fromBottomCoordinates, "bottom")
       )
 
+      val cardSize = Size(64, 114)
 
-      var referenceColor: Option[Color] = None
+      val fromTop = Rectangle(Point(83, 143), Point(458, 156))
+      val fromBottom = Rectangle(Point(83, 662), Point(458, 675))
+
+      val fromLeft = Rectangle(Point(20, 157), Point(75, 659))
+      val fromRight = Rectangle(Point(459, 157), Point(472, 659))
+
+
+      def splitHorizontalRectangleIntoCardWindows(rectangle: Rectangle, cardSize: Size): List[Rectangle] = {
+        val offset = (rectangle.size.width - 4 * cardSize.width) / 5
+
+        0.until(4).map { index =>
+          val topLeft: Point = rectangle.topLeft.copy(x = offset + index * (cardSize.width + offset))
+          Rectangle(topLeft, Size(cardSize.width, rectangle.size.height))
+        }.toList
+      }
+
+      def splitVerticalRectangleIntoCardWindows(rectangle: Rectangle, cardSize: Size): List[Rectangle] = {
+        val offset = (rectangle.size.height - 4 * cardSize.height) / 5
+
+        0.until(4).map { index =>
+          val topLeft: Point = rectangle.topLeft.copy(y = offset + index * (cardSize.height + offset))
+          Rectangle(topLeft, Size(rectangle.size.width, cardSize.height))
+        }.toList
+      }
+
+
+      val topRectangles = splitHorizontalRectangleIntoCardWindows(fromTop, cardSize)
+      val bottomRectangles = splitHorizontalRectangleIntoCardWindows(fromBottom, cardSize)
+      val leftRectangles = splitVerticalRectangleIntoCardWindows(fromLeft, cardSize)
+      val rightRectangles = splitVerticalRectangleIntoCardWindows(fromRight, cardSize)
+
+      val directions = (topRectangles, "top") ::(bottomRectangles, "bottom") ::(leftRectangles, "left") ::(rightRectangles, "right") :: Nil
+
+
+
+      val matchAreas: List[MatchArea] = for ((rectangles, direction) <- directions;
+                                             (rect, index) <- rectangles.zipWithIndex
+      )
+        yield MatchArea(rect, index, direction)
+
+
+      var firstFrame: Option[BufferedImage] = None
+      var firstFramesReferenceAreas: Map[MatchArea, Vector[Color]] = Map.empty
 
       var lastDiffedImage: Option[BufferedImage] = None
       var lastFrameWithColorChange: Option[FrameNumberChangeDetected] = None
 
-      case class FrameNumberChangeDetected(frameNumber: Int, direction: String)
+      case class FrameNumberChangeDetected(frameNumber: Int, matchArea: MatchArea)
 
-      1.to(numberOfFrames).foreach { frameNumber =>
+      var grabFrame: Option[Frame] = None
+      var frameNumber = 0
+      var numberOfGrabs = 0
+      while ( {
+        grabFrame = Option(g.grabFrame(true))
+        numberOfGrabs += 1
+        frameNumber += 1
+        grabFrame.isDefined
+      }
+      ) {
 
         val bufferedImage = Try(converter.convert(g.grabFrame(true))).toOption
 
         bufferedImage.foreach { image =>
+          println(s"analyzing frame #$frameNumber (of $numberOfGrabs grabs)")
 
           //check, if this image is n frames after the matchedFrame
-          if (lastFrameWithColorChange.isDefined && frameNumber >= lastFrameWithColorChange.get.frameNumber + 15) {
-            ImageIO.write(image, "png", new File(s"/home/flwi/Pictures/threes-capture/${frameNumber.formatted(formatString)}-newBoard-from-${lastFrameWithColorChange.get.direction}.png"))
+          if (frameNumber == 1 || lastFrameWithColorChange.isDefined && frameNumber >= lastFrameWithColorChange.get.frameNumber + 7) {
+            val filenameAddition = if(frameNumber > 1) s"-from-${lastFrameWithColorChange.get.matchArea.direction}-${lastFrameWithColorChange.get.matchArea.index}" else ""
+            val filename: String = s"${frameNumber.formatted(formatString)}-newBoard" + filenameAddition
+            ImageIO.write(image, "png", new File(s"/home/flwi/Pictures/threes-capture/$filename.png"))
             lastFrameWithColorChange = None
           }
 
@@ -97,33 +169,38 @@ with WordSpecLike with Matchers with BeforeAndAfterAll {
             lastDiffedImage = Some(image)
 
             //store reference color if not already set
-            if (referenceColor.isEmpty) {
-              referenceColor = Some(new Color(image.getRGB(12, 187)))
+            if (firstFrame.isEmpty) {
+              firstFrame = Some(image)
+              firstFramesReferenceAreas = matchAreas.map(ma => ma -> ma.area.coordinates.map(coord => new Color(image.getRGB(coord.x, coord.y)))).toMap
             }
           } else {
 
-            //check for change
-            if (!bufferedImagesEqual(lastDiffedImage.get, image)) {
-              println(s"#$frameNumber found diffing image, analyzing. further...")
-              lastDiffedImage = Some(image)
 
-              coordinates.foreach { case CoordinatesAndDirection(coords, direction) =>
+              val maybeArea = matchAreas.find { ma =>
 
-                val colors = coords.map(coord => new Color(image.getRGB(coord.x, coord.y)))
-                val numberOfPixelsChanged: Int = colors.count(c => calcColorDistance(c, referenceColor.get) > 100)
+                val colors = ma.area.coordinates.map(coord => new Color(image.getRGB(coord.x, coord.y)))
+                val colorsVsReferenceColors = colors.zip(firstFramesReferenceAreas.get(ma).get)
+                val colorDistances = colorsVsReferenceColors.map { case (cThis, cReference) => calcColorDistance(cThis, cReference) }
+                val numberOfPixelsChanged: Int = colorDistances.count (_ > 25 )
 
-                val significantChangeDetected = numberOfPixelsChanged > coords.size * 0.10
+                val significantChangeDetected = numberOfPixelsChanged > ma.area.coordinates.size * 0.1
+
+                if(numberOfPixelsChanged > 0) println(s"#$frameNumber; numberOfPixelsChanged: $numberOfPixelsChanged; direction: ${ma.direction}; Index: ${ma.index}")
+
 
                 if (significantChangeDetected) {
-                  lastFrameWithColorChange = Some(FrameNumberChangeDetected(frameNumber, direction))
 
-                  println(s"#$frameNumber found match in $frameNumber")
-                  println(s"#$frameNumber colors: " + colors.groupBy(c => c).map(tup => s"${tup._1}: ${tup._2.size}x"))
-                  ImageIO.write(image, "png", new File(s"/home/flwi/Pictures/threes-capture/${frameNumber.formatted(formatString)}-match-from-$direction.png"))
+                  println(s"#$frameNumber found match in $frameNumber; from-matchArea: ${ma.direction}; Index: ${ma.index}")
+                  ImageIO.write(image, "png", new File(s"/home/flwi/Pictures/threes-capture/${frameNumber.formatted(formatString)}-match-from-${ma.direction}-${ma.index}.png"))
 
                 }
+
+                significantChangeDetected
               }
-            }
+
+              maybeArea.foreach { ma =>
+                lastFrameWithColorChange = Some(FrameNumberChangeDetected(frameNumber, ma))
+              }
           }
         }
       }
@@ -174,6 +251,4 @@ with WordSpecLike with Matchers with BeforeAndAfterAll {
       }
     }
   }
-
-
 }
