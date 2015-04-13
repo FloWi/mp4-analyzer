@@ -146,14 +146,14 @@ with WordSpecLike with Matchers with BeforeAndAfterAll {
       while ( {
         grabFrame = Option(g.grabFrame(true))
         numberOfGrabs += 1
-        frameNumber += 1
         grabFrame.isDefined
       }
       ) {
 
-        val bufferedImage = Try(converter.convert(g.grabFrame(true))).toOption
+        val bufferedImage = Try(converter.convert(grabFrame.get)).toOption
 
         bufferedImage.foreach { image =>
+          frameNumber += 1
           println(s"analyzing frame #$frameNumber (of $numberOfGrabs grabs)")
 
           //check, if this image is n frames after the matchedFrame
@@ -191,7 +191,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll {
                 if (significantChangeDetected) {
 
                   println(s"#$frameNumber found match in $frameNumber; from-matchArea: ${ma.direction}; Index: ${ma.index}")
-                  ImageIO.write(image, "png", new File(s"/home/flwi/Pictures/threes-capture/${frameNumber.formatted(formatString)}-match-from-${ma.direction}-${ma.index}.png"))
+                  //ImageIO.write(image, "png", new File(s"/home/flwi/Pictures/threes-capture/${frameNumber.formatted(formatString)}-match-from-${ma.direction}-${ma.index}.png"))
 
                 }
 
