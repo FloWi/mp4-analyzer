@@ -98,26 +98,6 @@ with WordSpecLike with Matchers with BeforeAndAfterAll {
       val fromLeft = Rectangle(Point(20, 157), Point(75, 659))
       val fromRight = Rectangle(Point(459, 157), Point(472, 659))
 
-
-      def splitHorizontalRectangleIntoCardWindows(rectangle: Rectangle, cardSize: Size): List[Rectangle] = {
-        val offset = (rectangle.size.width - 4 * cardSize.width) / 5
-
-        0.until(4).map { index =>
-          val topLeft: Point = rectangle.topLeft.copy(x = offset + index * (cardSize.width + offset))
-          Rectangle(topLeft, Size(cardSize.width, rectangle.size.height))
-        }.toList
-      }
-
-      def splitVerticalRectangleIntoCardWindows(rectangle: Rectangle, cardSize: Size): List[Rectangle] = {
-        val offset = (rectangle.size.height - 4 * cardSize.height) / 5
-
-        0.until(4).map { index =>
-          val topLeft: Point = rectangle.topLeft.copy(y = offset + index * (cardSize.height + offset))
-          Rectangle(topLeft, Size(rectangle.size.width, cardSize.height))
-        }.toList
-      }
-
-
       val topRectangles = splitHorizontalRectangleIntoCardWindows(fromTop, cardSize)
       val bottomRectangles = splitHorizontalRectangleIntoCardWindows(fromBottom, cardSize)
       val leftRectangles = splitVerticalRectangleIntoCardWindows(fromLeft, cardSize)
@@ -159,7 +139,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll {
 
           //check, if this image is n frames after the matchedFrame
           if (frameNumber == 1 || lastFrameWithColorChange.isDefined && frameNumber >= lastFrameWithColorChange.get.frameNumber + 7) {
-            val filenameAddition = if(frameNumber > 1) s"-from-${lastFrameWithColorChange.get.matchArea.direction}-${lastFrameWithColorChange.get.matchArea.index}" else ""
+            val filenameAddition = if (frameNumber > 1) s"-from-${lastFrameWithColorChange.get.matchArea.direction}-${lastFrameWithColorChange.get.matchArea.index}" else ""
             val filename: String = s"${frameNumber.formatted(formatString)}-newBoard" + filenameAddition
             ImageIO.write(image, "png", new File(s"/home/flwi/Pictures/threes-capture/$filename.png"))
             lastFrameWithColorChange = None
@@ -176,32 +156,10 @@ with WordSpecLike with Matchers with BeforeAndAfterAll {
             }
           } else {
 
-
-              val maybeArea = matchAreas.find { ma =>
-
-                val colors = ma.area.coordinates.map(coord => new Color(image.getRGB(coord.x, coord.y)))
-                val colorsVsReferenceColors = colors.zip(firstFramesReferenceAreas.get(ma).get)
-                val colorDistances = colorsVsReferenceColors.map { case (cThis, cReference) => calcColorDistance(cThis, cReference) }
-                val numberOfPixelsChanged: Int = colorDistances.count (_ > 25 )
-
-                val significantChangeDetected = numberOfPixelsChanged > ma.area.coordinates.size * 0.1
-
-                if(numberOfPixelsChanged > 0) println(s"#$frameNumber; numberOfPixelsChanged: $numberOfPixelsChanged; direction: ${ma.direction}; Index: ${ma.index}")
-
-
-                if (significantChangeDetected) {
-
-                  println(s"#$frameNumber found match in $frameNumber; from-matchArea: ${ma.direction}; Index: ${ma.index}")
-                  //ImageIO.write(image, "png", new File(s"/home/flwi/Pictures/threes-capture/${frameNumber.formatted(formatString)}-match-from-${ma.direction}-${ma.index}.png"))
-
-                }
-
-                significantChangeDetected
-              }
-
-              maybeArea.foreach { ma =>
-                lastFrameWithColorChange = Some(FrameNumberChangeDetected(frameNumber, ma))
-              }
+            val maybeArea = findChangeInArea(frameNumber, firstFramesReferenceAreas, image)
+            maybeArea.foreach { ma =>
+              lastFrameWithColorChange = Some(FrameNumberChangeDetected(frameNumber, ma))
+            }
           }
         }
       }
@@ -209,6 +167,48 @@ with WordSpecLike with Matchers with BeforeAndAfterAll {
       g.stop()
     }
   }
+
+  def findChangeInArea(frameNumber: Int, firstFramesReferenceAreas: Map[MatchArea, Vector[Color]], image: BufferedImage): Option[MatchArea] = {
+
+    val matchAreas = firstFramesReferenceAreas.keySet
+    val maybeArea = matchAreas.find { ma =>
+
+      val colors = ma.area.coordinates.map(coord => new Color(image.getRGB(coord.x, coord.y)))
+      val colorsVsReferenceColors = colors.zip(firstFramesReferenceAreas.get(ma).get)
+      val colorDistances = colorsVsReferenceColors.map { case (cThis, cReference) => calcColorDistance(cThis, cReference) }
+      val numberOfPixelsChanged: Int = colorDistances.count(_ > 25)
+
+      val significantChangeDetected = numberOfPixelsChanged > ma.area.coordinates.size * 0.1
+
+      if (numberOfPixelsChanged > 0) println(s"#$frameNumber; numberOfPixelsChanged: $numberOfPixelsChanged; direction: ${ma.direction}; Index: ${ma.index}")
+
+      if (significantChangeDetected) {
+        println(s"#$frameNumber found match in $frameNumber; from-matchArea: ${ma.direction}; Index: ${ma.index}")
+        //ImageIO.write(image, "png", new File(s"/home/flwi/Pictures/threes-capture/${frameNumber.formatted(formatString)}-match-from-${ma.direction}-${ma.index}.png"))
+      }
+      significantChangeDetected
+    }
+    maybeArea
+  }
+
+  def splitHorizontalRectangleIntoCardWindows(rectangle: Rectangle, cardSize: Size): List[Rectangle] = {
+    val offset = (rectangle.size.width - 4 * cardSize.width) / 5
+
+    0.until(4).map { index =>
+      val topLeft: Point = rectangle.topLeft.copy(x = offset + index * (cardSize.width + offset))
+      Rectangle(topLeft, Size(cardSize.width, rectangle.size.height))
+    }.toList
+  }
+
+  def splitVerticalRectangleIntoCardWindows(rectangle: Rectangle, cardSize: Size): List[Rectangle] = {
+    val offset = (rectangle.size.height - 4 * cardSize.height) / 5
+
+    0.until(4).map { index =>
+      val topLeft: Point = rectangle.topLeft.copy(y = offset + index * (cardSize.height + offset))
+      Rectangle(topLeft, Size(rectangle.size.width, cardSize.height))
+    }.toList
+  }
+
 
   def calcColorDistance(c1: Color, c2: Color): Double = {
     val rmean: Double = (c1.getRed + c2.getRed) / 2
