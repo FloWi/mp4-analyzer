@@ -31,7 +31,6 @@ with WordSpecLike with Matchers with BeforeAndAfterAll {
 
       object Mp4Analyzer {
 
-
         val g = new FFmpegFrameGrabber(videoFilePath)
 
         //      val g = new OpenCVFrameGrabber(videoFilePath)
@@ -192,7 +191,6 @@ with WordSpecLike with Matchers with BeforeAndAfterAll {
       }.toList
     }
 
-
     def calcColorDistance(c1: Color, c2: Color): Double = {
       val rmean: Double = (c1.getRed + c2.getRed) / 2
       val r: Int = c1.getRed - c2.getRed
@@ -204,36 +202,5 @@ with WordSpecLike with Matchers with BeforeAndAfterAll {
       math.sqrt(weightR * r * r + weightG * g * g + weightB * b * b)
     }
 
-    def bufferedImagesEqual(img1: BufferedImage, img2: BufferedImage): Boolean = {
-
-      def getColors(img: BufferedImage) = for (x <- 0.until(img.getWidth);
-                                               y <- 0.until(img.getHeight))
-        yield new Color(img.getRGB(x, y))
-
-
-
-      if (img1.getWidth != img2.getWidth || img1.getHeight != img2.getHeight) {
-        false
-      } else {
-
-        val colors1 = getColors(img1)
-        val colors2 = getColors(img2)
-
-        val diffingPixels: List[((Color, Color, Double), Int)] = colors1
-          .zip(colors2)
-          //.map{ case (c1, c2) => c1.getRGB-c2.getRGB }
-          .zipWithIndex
-          .map { case ((c1, c2), index) => ((c1, c2, calcColorDistance(c1, c2)), index) }
-          .filter { case ((_, _, diff), _) => diff > 120 }.toList
-
-        if (diffingPixels.size < 100) {
-
-          true
-        } else {
-          //println(s"${diffingPixels.size} pixels differ")
-          false
-        }
-      }
-    }
   }
 }
