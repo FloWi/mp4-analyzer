@@ -8,17 +8,20 @@ import javax.imageio.ImageIO
 import org.bytedeco.javacv.OpenCVFrameConverter.ToMat
 import org.bytedeco.javacv.{Frame, Java2DFrameConverter, FFmpegFrameGrabber}
 
+import scala.collection.mutable
 import scala.util.Try
 
 object Mp4Analyzer {
+
+  val frameOffset = 7
 
   def getMatchAreas(cardSize: Size): List[MatchArea] = {
 
     val fromTop = Rectangle(Point(83, 143), Point(458, 156))
     val fromBottom = Rectangle(Point(83, 662), Point(458, 675))
 
-    val fromLeft = Rectangle(Point(20, 157), Point(75, 659))
-    val fromRight = Rectangle(Point(459, 157), Point(472, 659))
+    val fromLeft = Rectangle(Point(62, 157), Point(75, 659))
+    val fromRight = Rectangle(Point(465, 157), Point(478, 659))
 
     val topRectangles = splitHorizontalRectangleIntoCardWindows(fromTop, cardSize)
     val bottomRectangles = splitHorizontalRectangleIntoCardWindows(fromBottom, cardSize)
@@ -40,7 +43,7 @@ object Mp4Analyzer {
     matchAreas.map(ma => (ma, calcColorsOfMatchArea(ma, image))).toMap
   }
 
-  def analyze(videoFilePath: String) {
+  def analyze(videoFilePath: String, outputFolderPath: String): Map[Int, MatchArea] = {
 
     val g = new FFmpegFrameGrabber(videoFilePath)
 
@@ -65,13 +68,15 @@ object Mp4Analyzer {
     var firstFramesReferenceAreas: Map[MatchArea, Vector[Color]] = Map.empty
 
     var lastDiffedImage: Option[BufferedImage] = None
-    var lastFrameWithColorChange: Option[FrameNumberChangeDetected] = None
 
     case class FrameNumberChangeDetected(frameNumber: Int, matchArea: MatchArea)
 
     var grabFrame: Option[Frame] = None
     var frameNumber = 0
     var numberOfGrabs = 0
+
+    val framesWithChangeDetected = mutable.HashMap.empty[Int, MatchArea]
+
     while ( {
       grabFrame = Option(g.grabFrame(true))
       numberOfGrabs += 1
@@ -86,11 +91,11 @@ object Mp4Analyzer {
         println(s"analyzing frame #$frameNumber (of $numberOfGrabs grabs)")
 
         //check, if this image is n frames after the matchedFrame
-        if (frameNumber == 1 || lastFrameWithColorChange.isDefined && frameNumber >= lastFrameWithColorChange.get.frameNumber + 7) {
-          val filenameAddition = if (frameNumber > 1) s"-from-${lastFrameWithColorChange.get.matchArea.direction}-${lastFrameWithColorChange.get.matchArea.index}" else ""
+        val maybeFrameToGrab = framesWithChangeDetected.get(frameNumber - frameOffset)
+        if (frameNumber == 1 || maybeFrameToGrab.isDefined) {
+          val filenameAddition = if (frameNumber > 1) s"-from-${maybeFrameToGrab.get.direction}-${maybeFrameToGrab.get.index}" else ""
           val filename: String = s"${frameNumber.formatted(formatString)}-newBoard" + filenameAddition
-          ImageIO.write(image, "png", new File(s"/home/flwi/Pictures/threes-capture/$filename.png"))
-          lastFrameWithColorChange = None
+          ImageIO.write(image, "png", new File(s"$outputFolderPath/$filename.png"))
         }
 
         if (lastDiffedImage.isEmpty) {
@@ -106,13 +111,15 @@ object Mp4Analyzer {
 
           val maybeArea = findAreaWithChangedPixelColors(frameNumber, firstFramesReferenceAreas, image)
           maybeArea.foreach { ma =>
-            lastFrameWithColorChange = Some(FrameNumberChangeDetected(frameNumber, ma))
+            ImageIO.write(image, "png", new File(s"$outputFolderPath/movement-detected-${frameNumber.formatted(formatString)}-match-from-${ma.direction}-${ma.index}.png"))
+            framesWithChangeDetected += frameNumber -> ma
           }
         }
       }
     }
-
     g.stop()
+
+    framesWithChangeDetected.toMap
   }
 
   def findAreaWithChangedPixelColors(frameNumber: Int, firstFramesReferenceAreas: Map[MatchArea, Vector[Color]], image: BufferedImage): Option[MatchArea] = {
@@ -120,11 +127,10 @@ object Mp4Analyzer {
     val matchAreas = firstFramesReferenceAreas.keySet
     val maybeArea = matchAreas.find { ma =>
 
-      println(s"analyzing $ma")
-
       val colors = ma.area.coordinates.map(coord => new Color(image.getRGB(coord.x, coord.y)))
       val colorsVsReferenceColors = colors.zip(firstFramesReferenceAreas.get(ma).get)
       val colorDistances = colorsVsReferenceColors.map { case (cThis, cReference) => calcColorDistance(cThis, cReference) }
+      val groupedByColorDistance: Map[Int, Int] = colorDistances.groupBy(_.toInt).map { case (distance, distances) => (distance, distances.size) }
       val numberOfPixelsChanged: Int = colorDistances.count(_ > 25)
 
       val significantChangeDetected = numberOfPixelsChanged > ma.area.coordinates.size * 0.1
@@ -133,7 +139,6 @@ object Mp4Analyzer {
 
       if (significantChangeDetected) {
         println(s"#$frameNumber found match in $frameNumber; from-matchArea: ${ma.direction}; Index: ${ma.index}")
-        //ImageIO.write(image, "png", new File(s"/home/flwi/Pictures/threes-capture/${frameNumber.formatted(formatString)}-match-from-${ma.direction}-${ma.index}.png"))
       }
       significantChangeDetected
     }
@@ -144,7 +149,7 @@ object Mp4Analyzer {
     val offset = (rectangle.size.width - 4 * cardSize.width) / 5
 
     0.until(4).map { index =>
-      val topLeft: Point = rectangle.topLeft.copy(x = offset + index * (cardSize.width + offset))
+      val topLeft: Point = rectangle.topLeft.copy(x = rectangle.topLeft.x +offset + index * (cardSize.width + offset))
       Rectangle(topLeft, Size(cardSize.width, rectangle.size.height))
     }.toList
   }
@@ -153,7 +158,7 @@ object Mp4Analyzer {
     val offset = (rectangle.size.height - 4 * cardSize.height) / 5
 
     0.until(4).map { index =>
-      val topLeft: Point = rectangle.topLeft.copy(y = offset + index * (cardSize.height + offset))
+      val topLeft: Point = rectangle.topLeft.copy(y = rectangle.topLeft.y + offset + index * (cardSize.height + offset))
       Rectangle(topLeft, Size(rectangle.size.width, cardSize.height))
     }.toList
   }

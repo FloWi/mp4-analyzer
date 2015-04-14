@@ -1,5 +1,7 @@
 package de.flwi.mp4analyzer
 
+import java.awt.Color
+import java.awt.image.BufferedImage
 import java.io.{FileFilter, File}
 import java.net.URL
 import javax.imageio.ImageIO
@@ -24,7 +26,18 @@ with WordSpecLike with Matchers with BeforeAndAfterAll {
       //val videoFilePath: String = "/home/flwi/Downloads/Short video clip-nature.mp4-SD.mp4"
       val videoFilePath: String = "/home/flwi/ownCloud/douglas/82k_threes.mp4"
 
-      Mp4Analyzer.analyze(videoFilePath)
+      val framesWithMovement: Map[Int, MatchArea] = Mp4Analyzer.analyze(videoFilePath, "/home/flwi/Pictures/threes-capture/secondRun/")
+
+      val frameNumbersWithMovement = framesWithMovement.keys.toList.sorted.mkString(", ")
+      val frameNumbersToGrab = framesWithMovement.keys.toList.map(_+Mp4Analyzer.frameOffset).sorted.mkString(", ")
+
+      println(
+        s"""Frames with movement
+           |$framesWithMovement""".stripMargin)
+
+      println(
+        s"""Frames to grab
+           |$frameNumbersToGrab""".stripMargin)
     }
   }
 
@@ -43,7 +56,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll {
       val images = imageFiles.map(imageFile => (imageFile.getName, ImageIO.read(imageFile))).toMap
 
       images.forall{ case (_, image) =>
-        image.getHeight == 720 && image.getWidth == 540
+        Mp4Analyzer.findAreaWithChangedPixelColors(0, referenceImageInformation, image).isDefined
       }
 
       val fromLeft3WithWhiteCard = images("image-237.png")
@@ -52,7 +65,33 @@ with WordSpecLike with Matchers with BeforeAndAfterAll {
       assert(maybeMatchArea.get.index == 3)
       assert(maybeMatchArea.get.direction == "left")
 
+    }
+  }
 
+  "Visually debugging" must {
+    "show that the right areas are being selected" in {
+
+      val filename: String = "/boardWithHighTile.png"
+
+      val referenceImage = ImageIO.read(new File(getClass.getResource(filename).getFile))
+      val matchAreas: List[MatchArea] = Mp4Analyzer.getMatchAreas(Size(64, 114))
+
+      val referenceImageInformation = Mp4Analyzer.getColorInformationOfMatchAreas(matchAreas, referenceImage)
+
+      val allMatchAreasImage = ImageIO.read(new File(getClass.getResource(filename).getFile))
+
+      val coloredMatchAreas: Map[MatchArea, BufferedImage] = referenceImageInformation.map { case (ma, _) =>
+        val imageForThisMa = ImageIO.read(new File(getClass.getResource(filename).getFile))
+        ma.area.coordinates.foreach(coord => allMatchAreasImage.setRGB(coord.x, coord.y, Color.gray.getRGB))
+        ma.area.coordinates.foreach(coord => imageForThisMa.setRGB(coord.x, coord.y, Color.gray.getRGB))
+        ImageIO.write(allMatchAreasImage, "png", new File(s"/tmp/matchArea-from-${ma.direction}-index-${ma.index}.png"))
+        (ma, imageForThisMa)
+      }
+
+      ImageIO.write(allMatchAreasImage, "png", new File(s"/tmp/all-matchAreas.png"))
+
+
+      coloredMatchAreas
 
     }
   }
