@@ -7,6 +7,7 @@ scalaVersion := "2.11.5"
 libraryDependencies ++= Seq(
   "com.typesafe.akka" %% "akka-actor" % "2.3.9",
   "com.typesafe.akka" %% "akka-testkit" % "2.3.9" % "test",
+  "com.typesafe.akka" % "akka-stream-experimental_2.11" % "1.0-M5",
   "org.scalatest" %% "scalatest" % "2.2.4" % "test")
 
 
