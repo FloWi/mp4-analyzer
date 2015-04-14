@@ -58,6 +58,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll {
       val x = new ToMat
 
       g.start()
+
       val numberOfFrames = g.getLengthInFrames
 
       val numberOfDigits = numberOfFrames.toString.length
@@ -153,7 +154,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll {
         val bufferedImage = Try(converter.convert(grabFrame.get)).toOption
 
         bufferedImage.foreach { image =>
-          frameNumber += 1
+          frameNumber = g.getFrameNumber
           println(s"analyzing frame #$frameNumber (of $numberOfGrabs grabs)")
 
           //check, if this image is n frames after the matchedFrame
