@@ -38,6 +38,7 @@ server.pid
 /dist/
 .cache
 
-
-
 .idea
+
+### Dolphin 
+.directory
