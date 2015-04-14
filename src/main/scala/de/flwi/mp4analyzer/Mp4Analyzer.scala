@@ -17,11 +17,11 @@ object Mp4Analyzer {
 
   def getMatchAreas(cardSize: Size): List[MatchArea] = {
 
-    val fromTop = Rectangle(Point(83, 143), Point(458, 156))
-    val fromBottom = Rectangle(Point(83, 662), Point(458, 675))
+    val fromTop = Rectangle(Point(83,141),Size(375,13))
+    val fromBottom = Rectangle(Point(83,664),Size(375,13))
 
-    val fromLeft = Rectangle(Point(62, 157), Point(75, 659))
-    val fromRight = Rectangle(Point(465, 157), Point(478, 659))
+    val fromLeft = Rectangle(Point(58,157),Size(13,502))
+    val fromRight = Rectangle(Point(469,157),Size(13,502))
 
     val topRectangles = splitHorizontalRectangleIntoCardWindows(fromTop, cardSize)
     val bottomRectangles = splitHorizontalRectangleIntoCardWindows(fromBottom, cardSize)

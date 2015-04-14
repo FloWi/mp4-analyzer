@@ -89,10 +89,6 @@ with WordSpecLike with Matchers with BeforeAndAfterAll {
       }
 
       ImageIO.write(allMatchAreasImage, "png", new File(s"/tmp/all-matchAreas.png"))
-
-
-      coloredMatchAreas
-
     }
   }
 }
