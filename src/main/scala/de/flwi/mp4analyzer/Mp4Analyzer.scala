@@ -12,7 +12,35 @@ import scala.util.Try
 
 object Mp4Analyzer {
 
-  def analyze(videoFilePath: File) {
+  def getMatchAreas(cardSize: Size): List[MatchArea] = {
+
+    val fromTop = Rectangle(Point(83, 143), Point(458, 156))
+    val fromBottom = Rectangle(Point(83, 662), Point(458, 675))
+
+    val fromLeft = Rectangle(Point(20, 157), Point(75, 659))
+    val fromRight = Rectangle(Point(459, 157), Point(472, 659))
+
+    val topRectangles = splitHorizontalRectangleIntoCardWindows(fromTop, cardSize)
+    val bottomRectangles = splitHorizontalRectangleIntoCardWindows(fromBottom, cardSize)
+    val leftRectangles = splitVerticalRectangleIntoCardWindows(fromLeft, cardSize)
+    val rightRectangles = splitVerticalRectangleIntoCardWindows(fromRight, cardSize)
+
+    val directions = (topRectangles, "top") ::(bottomRectangles, "bottom") ::(leftRectangles, "left") ::(rightRectangles, "right") :: Nil
+
+    for ((rectangles, direction) <- directions;
+         (rect, index) <- rectangles.zipWithIndex)
+      yield MatchArea(rect, index, direction)
+  }
+  
+  def calcColorsOfMatchArea(matchArea: MatchArea, image: BufferedImage): Vector[Color] = {
+    matchArea.area.coordinates.map(coord => new Color(image.getRGB(coord.x, coord.y)))
+  }
+  
+  def getColorInformationOfMatchAreas(matchAreas: List[MatchArea], image: BufferedImage): Map[MatchArea, Vector[Color]] = {
+    matchAreas.map(ma => (ma, calcColorsOfMatchArea(ma, image))).toMap
+  }
+
+  def analyze(videoFilePath: String) {
 
     val g = new FFmpegFrameGrabber(videoFilePath)
 
@@ -30,53 +58,8 @@ object Mp4Analyzer {
     val numberOfDigits = numberOfFrames.toString.length
     val formatString = s"%0${numberOfDigits}d"
 
-
-    val fromLeftCoordinates = (for (x <- 62.to(75);
-                                    y <- 183.to(638))
-      yield Point(x, y)).toList
-
-    val fromRightCoordinates = (for (x <- 462.to(475);
-                                     y <- 183.to(638))
-      yield Point(x, y)).toList
-
-    val fromTopCoordinates = (for (x <- 98.to(440);
-                                   y <- 143.to(154))
-      yield Point(x, y)).toList
-
-    val fromBottomCoordinates = (for (x <- 98.to(440);
-                                      y <- 667.to(680))
-      yield Point(x, y)).toList
-
-    case class CoordinatesAndDirection(coordinates: List[Point], direction: String)
-
-    val coordinates = List(
-      CoordinatesAndDirection(fromLeftCoordinates, "left"),
-      CoordinatesAndDirection(fromRightCoordinates, "right"),
-      CoordinatesAndDirection(fromTopCoordinates, "top"),
-      CoordinatesAndDirection(fromBottomCoordinates, "bottom")
-    )
-
-    val cardSize = Size(64, 114)
-
-    val fromTop = Rectangle(Point(83, 143), Point(458, 156))
-    val fromBottom = Rectangle(Point(83, 662), Point(458, 675))
-
-    val fromLeft = Rectangle(Point(20, 157), Point(75, 659))
-    val fromRight = Rectangle(Point(459, 157), Point(472, 659))
-
-    val topRectangles = splitHorizontalRectangleIntoCardWindows(fromTop, cardSize)
-    val bottomRectangles = splitHorizontalRectangleIntoCardWindows(fromBottom, cardSize)
-    val leftRectangles = splitVerticalRectangleIntoCardWindows(fromLeft, cardSize)
-    val rightRectangles = splitVerticalRectangleIntoCardWindows(fromRight, cardSize)
-
-    val directions = (topRectangles, "top") ::(bottomRectangles, "bottom") ::(leftRectangles, "left") ::(rightRectangles, "right") :: Nil
-
-
-    val matchAreas: List[MatchArea] = for ((rectangles, direction) <- directions;
-                                           (rect, index) <- rectangles.zipWithIndex
-    )
-      yield MatchArea(rect, index, direction)
-
+    val cardSize: Size = Size(64, 114)
+    val matchAreas = getMatchAreas(cardSize)
 
     var firstFrame: Option[BufferedImage] = None
     var firstFramesReferenceAreas: Map[MatchArea, Vector[Color]] = Map.empty
@@ -117,11 +100,11 @@ object Mp4Analyzer {
           //store reference color if not already set
           if (firstFrame.isEmpty) {
             firstFrame = Some(image)
-            firstFramesReferenceAreas = matchAreas.map(ma => ma -> ma.area.coordinates.map(coord => new Color(image.getRGB(coord.x, coord.y)))).toMap
+            firstFramesReferenceAreas = getColorInformationOfMatchAreas(matchAreas, image)
           }
         } else {
 
-          val maybeArea = findChangeInArea(frameNumber, firstFramesReferenceAreas, image)
+          val maybeArea = findAreaWithChangedPixelColors(frameNumber, firstFramesReferenceAreas, image)
           maybeArea.foreach { ma =>
             lastFrameWithColorChange = Some(FrameNumberChangeDetected(frameNumber, ma))
           }
@@ -132,10 +115,12 @@ object Mp4Analyzer {
     g.stop()
   }
 
-  def findChangeInArea(frameNumber: Int, firstFramesReferenceAreas: Map[MatchArea, Vector[Color]], image: BufferedImage): Option[MatchArea] = {
+  def findAreaWithChangedPixelColors(frameNumber: Int, firstFramesReferenceAreas: Map[MatchArea, Vector[Color]], image: BufferedImage): Option[MatchArea] = {
 
     val matchAreas = firstFramesReferenceAreas.keySet
     val maybeArea = matchAreas.find { ma =>
+
+      println(s"analyzing $ma")
 
       val colors = ma.area.coordinates.map(coord => new Color(image.getRGB(coord.x, coord.y)))
       val colorsVsReferenceColors = colors.zip(firstFramesReferenceAreas.get(ma).get)
