@@ -33,7 +33,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll {
 
       println(
         s"""Frames with movement
-           |$framesWithMovement""".stripMargin)
+           |$frameNumbersWithMovement""".stripMargin)
 
       println(
         s"""Frames to grab

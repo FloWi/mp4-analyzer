@@ -34,11 +34,11 @@ object Mp4Analyzer {
          (rect, index) <- rectangles.zipWithIndex)
       yield MatchArea(rect, index, direction)
   }
-  
+
   def calcColorsOfMatchArea(matchArea: MatchArea, image: BufferedImage): Vector[Color] = {
     matchArea.area.coordinates.map(coord => new Color(image.getRGB(coord.x, coord.y)))
   }
-  
+
   def getColorInformationOfMatchAreas(matchAreas: List[MatchArea], image: BufferedImage): Map[MatchArea, Vector[Color]] = {
     matchAreas.map(ma => (ma, calcColorsOfMatchArea(ma, image))).toMap
   }
@@ -111,7 +111,16 @@ object Mp4Analyzer {
 
           val maybeArea = findAreaWithChangedPixelColors(frameNumber, firstFramesReferenceAreas, image)
           maybeArea.foreach { ma =>
-            ImageIO.write(image, "png", new File(s"$outputFolderPath/movement-detected-${frameNumber.formatted(formatString)}-match-from-${ma.direction}-${ma.index}.png"))
+            //check, if last movement detection was 1-2 frames ago - then remove the old detection to avoid double scan
+
+            val lastFrameWithMovement: Int = if(framesWithChangeDetected.keySet.isEmpty) 0 else framesWithChangeDetected.keySet.max
+            val skipThisDetection = lastFrameWithMovement + 2 >= frameNumber
+            if (skipThisDetection && framesWithChangeDetected.contains(lastFrameWithMovement)) {
+              println(s"duplicate-detection in #$frameNumber (max: $lastFrameWithMovement)")
+              framesWithChangeDetected -= lastFrameWithMovement
+            } else {
+              //ImageIO.write(image, "png", new File(s"$outputFolderPath/movement-detected-${frameNumber.formatted(formatString)}-match-from-${ma.direction}-${ma.index}.png"))
+            }
             framesWithChangeDetected += frameNumber -> ma
           }
         }
@@ -130,16 +139,15 @@ object Mp4Analyzer {
       val colors = ma.area.coordinates.map(coord => new Color(image.getRGB(coord.x, coord.y)))
       val colorsVsReferenceColors = colors.zip(firstFramesReferenceAreas.get(ma).get)
       val colorDistances = colorsVsReferenceColors.map { case (cThis, cReference) => calcColorDistance(cThis, cReference) }
-      val groupedByColorDistance: Map[Int, Int] = colorDistances.groupBy(_.toInt).map { case (distance, distances) => (distance, distances.size) }
       val numberOfPixelsChanged: Int = colorDistances.count(_ > 25)
 
       val significantChangeDetected = numberOfPixelsChanged > ma.area.coordinates.size * 0.1
 
-      if (numberOfPixelsChanged > 0) println(s"#$frameNumber; numberOfPixelsChanged: $numberOfPixelsChanged; direction: ${ma.direction}; Index: ${ma.index}")
-
-      if (significantChangeDetected) {
-        println(s"#$frameNumber found match in $frameNumber; from-matchArea: ${ma.direction}; Index: ${ma.index}")
-      }
+//      if (numberOfPixelsChanged > 0) println(s"#$frameNumber; numberOfPixelsChanged: $numberOfPixelsChanged; direction: ${ma.direction}; Index: ${ma.index}")
+//
+//      if (significantChangeDetected) {
+//        println(s"#$frameNumber found match in $frameNumber; from-matchArea: ${ma.direction}; Index: ${ma.index}")
+//      }
       significantChangeDetected
     }
     maybeArea
@@ -149,7 +157,7 @@ object Mp4Analyzer {
     val offset = (rectangle.size.width - 4 * cardSize.width) / 5
 
     0.until(4).map { index =>
-      val topLeft: Point = rectangle.topLeft.copy(x = rectangle.topLeft.x +offset + index * (cardSize.width + offset))
+      val topLeft: Point = rectangle.topLeft.copy(x = rectangle.topLeft.x + offset + index * (cardSize.width + offset))
       Rectangle(topLeft, Size(cardSize.width, rectangle.size.height))
     }.toList
   }
