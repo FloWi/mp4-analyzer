@@ -1,4 +1,4 @@
-name := """mp4-analyzer"""
+name := """mp4analyzer"""
 
 version := "1.0"
 
