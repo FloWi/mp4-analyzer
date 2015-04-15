@@ -13,6 +13,7 @@ import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
 
 class MovieGrabberSpec(_system: ActorSystem) extends TestKit(_system) with ImplicitSender
 with WordSpecLike with Matchers with BeforeAndAfterAll {
+  val cardSize: Size = Size(64, 114)
 
   def this() = this(ActorSystem("MySpec"))
 
@@ -26,7 +27,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll {
       //val videoFilePath: String = "/home/flwi/Downloads/Short video clip-nature.mp4-SD.mp4"
       val videoFilePath: String = "/home/flwi/ownCloud/douglas/82k_threes.mp4"
 
-      val framesWithMovement: Map[Int, MatchArea] = Mp4Analyzer.analyze(videoFilePath, "/home/flwi/Pictures/threes-capture/secondRun/")
+      val framesWithMovement: Map[Int, MatchArea] = Mp4Analyzer.analyzeAndWriteToImageFiles(videoFilePath, "/home/flwi/Pictures/threes-capture/secondRun/")
 
       val frameNumbersWithMovement = framesWithMovement.keys.toList.sorted.mkString(", ")
       val frameNumbersToGrab = framesWithMovement.keys.toList.map(_+Mp4Analyzer.frameOffset).sorted.mkString(", ")
@@ -45,7 +46,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll {
     "be detected correctly" in {
 
       val referenceImage = ImageIO.read(new File(getClass.getResource("/newBoard.png").getFile))
-      val matchAreas: List[MatchArea] = Mp4Analyzer.getMatchAreas(Size(64, 114))
+      val matchAreas: List[MatchArea] = Mp4Analyzer.getMatchAreas(cardSize)
       
       val referenceImageInformation = Mp4Analyzer.getColorInformationOfMatchAreas(matchAreas, referenceImage)
 
@@ -74,7 +75,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll {
       val filename: String = "/boardWithHighTile.png"
 
       val referenceImage = ImageIO.read(new File(getClass.getResource(filename).getFile))
-      val matchAreas: List[MatchArea] = Mp4Analyzer.getMatchAreas(Size(64, 114))
+      val matchAreas: List[MatchArea] = Mp4Analyzer.getMatchAreas(cardSize)
 
       val referenceImageInformation = Mp4Analyzer.getColorInformationOfMatchAreas(matchAreas, referenceImage)
 
@@ -89,6 +90,19 @@ with WordSpecLike with Matchers with BeforeAndAfterAll {
       }
 
       ImageIO.write(allMatchAreasImage, "png", new File(s"/tmp/all-matchAreas.png"))
+    }
+  }
+
+  "A stream" must {
+    "be constructed properly" in {
+      val framesStream: Stream[(Int, BufferedImage)] = Mp4Analyzer.getFrameStream("/home/flwi/ownCloud/douglas/82k_threes.mp4")
+      
+      val framesWithMovementsStream = Mp4Analyzer.getNewBoardsStream(framesStream, Mp4Analyzer.getMatchAreas(cardSize))
+
+      val take: List[(Int, BufferedImage, MatchArea)] = framesWithMovementsStream.take(10).toList
+      val ints: List[Int] = take.map(_._1)
+
+      assert(ints == 0.to(10).toList)
     }
   }
 }

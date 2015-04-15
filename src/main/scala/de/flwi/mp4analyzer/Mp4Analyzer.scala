@@ -5,9 +5,9 @@ import java.awt.image.BufferedImage
 import java.io.File
 import javax.imageio.ImageIO
 
-import org.bytedeco.javacv.OpenCVFrameConverter.ToMat
-import org.bytedeco.javacv.{Frame, Java2DFrameConverter, FFmpegFrameGrabber}
+import org.bytedeco.javacv.{FFmpegFrameGrabber, Java2DFrameConverter}
 
+import scala.collection.immutable.Stream
 import scala.collection.mutable
 import scala.util.Try
 
@@ -17,11 +17,11 @@ object Mp4Analyzer {
 
   def getMatchAreas(cardSize: Size): List[MatchArea] = {
 
-    val fromTop = Rectangle(Point(83,141),Size(375,13))
-    val fromBottom = Rectangle(Point(83,664),Size(375,13))
+    val fromTop = Rectangle(Point(83, 141), Size(375, 13))
+    val fromBottom = Rectangle(Point(83, 664), Size(375, 13))
 
-    val fromLeft = Rectangle(Point(58,157),Size(13,502))
-    val fromRight = Rectangle(Point(469,157),Size(13,502))
+    val fromLeft = Rectangle(Point(58, 157), Size(13, 502))
+    val fromRight = Rectangle(Point(469, 157), Size(13, 502))
 
     val topRectangles = splitHorizontalRectangleIntoCardWindows(fromTop, cardSize)
     val bottomRectangles = splitHorizontalRectangleIntoCardWindows(fromBottom, cardSize)
@@ -43,92 +43,79 @@ object Mp4Analyzer {
     matchAreas.map(ma => (ma, calcColorsOfMatchArea(ma, image))).toMap
   }
 
-  def analyze(videoFilePath: String, outputFolderPath: String): Map[Int, MatchArea] = {
-
-    val g = new FFmpegFrameGrabber(videoFilePath)
-
-    //      val g = new OpenCVFrameGrabber(videoFilePath)
-    //      g.start()
-
+  def getFrameStream(videoFilePath: String): Stream[(Int, BufferedImage)] = {
     val converter = new Java2DFrameConverter()
 
-    val x = new ToMat
+    def terminatingStream(g: FFmpegFrameGrabber): Stream[(Int, BufferedImage)] = {
+      val grabFrame = Option(g.grabFrame(true))
+      val frameNumber: Int = g.getFrameNumber
+      println(s"Frame: #$frameNumber, grabFrame: $grabFrame")
 
-    g.start()
-
-    val numberOfFrames = g.getLengthInFrames
-
-    val numberOfDigits = numberOfFrames.toString.length
-    val formatString = s"%0${numberOfDigits}d"
-
-    val cardSize: Size = Size(64, 114)
-    val matchAreas = getMatchAreas(cardSize)
-
-    var firstFrame: Option[BufferedImage] = None
-    var firstFramesReferenceAreas: Map[MatchArea, Vector[Color]] = Map.empty
-
-    var lastDiffedImage: Option[BufferedImage] = None
-
-    case class FrameNumberChangeDetected(frameNumber: Int, matchArea: MatchArea)
-
-    var grabFrame: Option[Frame] = None
-    var frameNumber = 0
-    var numberOfGrabs = 0
-
-    val framesWithChangeDetected = mutable.HashMap.empty[Int, MatchArea]
-
-    while ( {
-      grabFrame = Option(g.grabFrame(true))
-      numberOfGrabs += 1
-      grabFrame.isDefined
-    }
-    ) {
-
-      val bufferedImage = Try(converter.convert(grabFrame.get)).toOption
-
-      bufferedImage.foreach { image =>
-        frameNumber = g.getFrameNumber
-        println(s"analyzing frame #$frameNumber (of $numberOfGrabs grabs)")
-
-        //check, if this image is n frames after the matchedFrame
-        val maybeFrameToGrab = framesWithChangeDetected.get(frameNumber - frameOffset)
-        if (frameNumber == 1 || maybeFrameToGrab.isDefined) {
-          val filenameAddition = if (frameNumber > 1) s"-from-${maybeFrameToGrab.get.direction}-${maybeFrameToGrab.get.index}" else ""
-          val filename: String = s"${frameNumber.formatted(formatString)}-newBoard" + filenameAddition
-          ImageIO.write(image, "png", new File(s"$outputFolderPath/$filename.png"))
-        }
-
-        if (lastDiffedImage.isEmpty) {
-          println(s"#$frameNumber set reference image")
-          lastDiffedImage = Some(image)
-
-          //store reference color if not already set
-          if (firstFrame.isEmpty) {
-            firstFrame = Some(image)
-            firstFramesReferenceAreas = getColorInformationOfMatchAreas(matchAreas, image)
+      grabFrame match {
+        //No frame could be grabbed - just stop
+        case None =>
+          g.stop()
+          Stream.empty
+        case Some(frame) =>
+          //it is possible, that a frame can't be converted to an image.
+          //So just pick the next one and try again
+          val maybeImage = Try(converter.convert(frame)).toOption
+          maybeImage match {
+            case None => terminatingStream(g)
+            case Some(image) => Stream.cons((frameNumber, image), terminatingStream(g))
           }
-        } else {
-
-          val maybeArea = findAreaWithChangedPixelColors(frameNumber, firstFramesReferenceAreas, image)
-          maybeArea.foreach { ma =>
-            //check, if last movement detection was 1-2 frames ago - then remove the old detection to avoid double scan
-
-            val lastFrameWithMovement: Int = if(framesWithChangeDetected.keySet.isEmpty) 0 else framesWithChangeDetected.keySet.max
-            val skipThisDetection = lastFrameWithMovement + 2 >= frameNumber
-            if (skipThisDetection && framesWithChangeDetected.contains(lastFrameWithMovement)) {
-              println(s"duplicate-detection in #$frameNumber (max: $lastFrameWithMovement)")
-              framesWithChangeDetected -= lastFrameWithMovement
-            } else {
-              //ImageIO.write(image, "png", new File(s"$outputFolderPath/movement-detected-${frameNumber.formatted(formatString)}-match-from-${ma.direction}-${ma.index}.png"))
-            }
-            framesWithChangeDetected += frameNumber -> ma
-          }
-        }
       }
     }
-    g.stop()
 
-    framesWithChangeDetected.toMap
+    val g: FFmpegFrameGrabber = new FFmpegFrameGrabber(videoFilePath)
+    g.start()
+
+    terminatingStream(g)
+  }
+
+  def getNewBoardsStream(framesStream: Stream[(Int, BufferedImage)], matchAreas: List[MatchArea]): Stream[(Int, BufferedImage, MatchArea)] = {
+
+    var mayBeFirstFramesReferenceAreas = Option.empty[Map[MatchArea, Vector[Color]]]
+
+    def helper(streamOfFrames: Stream[(Int, BufferedImage)], framesWithMovement: Map[Int, MatchArea]): Stream[(Int, BufferedImage, MatchArea)] = {
+
+      streamOfFrames match {
+        case (frameNumber, image) #:: cons if framesWithMovement.contains(frameNumber - 7) =>
+          (frameNumber, image, framesWithMovement(frameNumber - 7)) #:: helper(cons, framesWithMovement)
+
+        case (frameNumber, image) #:: cons =>
+          //grab the first frame as reference
+          if (frameNumber == 0) mayBeFirstFramesReferenceAreas = Some(getColorInformationOfMatchAreas(matchAreas, image))
+
+          //analyze frame
+          val maybeMatchArea: Option[MatchArea] = mayBeFirstFramesReferenceAreas match {
+            case None => None
+            case Some(firstFramesReferenceAreas) => findAreaWithChangedPixelColors(frameNumber, firstFramesReferenceAreas, image)
+          }
+
+          //check for movement
+          maybeMatchArea match {
+            case None => helper(cons, framesWithMovement)
+            case Some(area) =>
+
+              //has another frame been found that was very close to this frame? if so, remove the old find and add this one
+              val lastFrameWithMovement: Int = if (framesWithMovement.keySet.isEmpty) 0 else framesWithMovement.keySet.max
+              val useThisDetectionInsteadOfLastOne = lastFrameWithMovement + 2 >= frameNumber
+              if (useThisDetectionInsteadOfLastOne) framesWithMovement.-(frameNumber)
+
+              helper(cons, framesWithMovement.updated(frameNumber, area))
+          }
+        case _ => Stream.empty
+      }
+    }
+
+    helper(framesStream, Map.empty)
+  }
+
+  def analyzeAndWriteToImageFiles(videoFilePath: String, outputFolderPath: String): Map[Int, MatchArea] = {
+
+    getNewBoardsStream(getFrameStream(videoFilePath), getMatchAreas(Size()))
+
   }
 
   def findAreaWithChangedPixelColors(frameNumber: Int, firstFramesReferenceAreas: Map[MatchArea, Vector[Color]], image: BufferedImage): Option[MatchArea] = {
@@ -143,11 +130,11 @@ object Mp4Analyzer {
 
       val significantChangeDetected = numberOfPixelsChanged > ma.area.coordinates.size * 0.1
 
-//      if (numberOfPixelsChanged > 0) println(s"#$frameNumber; numberOfPixelsChanged: $numberOfPixelsChanged; direction: ${ma.direction}; Index: ${ma.index}")
-//
-//      if (significantChangeDetected) {
-//        println(s"#$frameNumber found match in $frameNumber; from-matchArea: ${ma.direction}; Index: ${ma.index}")
-//      }
+      //      if (numberOfPixelsChanged > 0) println(s"#$frameNumber; numberOfPixelsChanged: $numberOfPixelsChanged; direction: ${ma.direction}; Index: ${ma.index}")
+      //
+      //      if (significantChangeDetected) {
+      //        println(s"#$frameNumber found match in $frameNumber; from-matchArea: ${ma.direction}; Index: ${ma.index}")
+      //      }
       significantChangeDetected
     }
     maybeArea
