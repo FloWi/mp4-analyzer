@@ -14,6 +14,8 @@ import scala.util.Try
 object Mp4Analyzer {
 
   val frameOffset = 7
+  val cardSize: Size = Size(64, 114)
+
 
   def getMatchAreas(cardSize: Size): List[MatchArea] = {
 
@@ -114,8 +116,9 @@ object Mp4Analyzer {
 
   def analyzeAndWriteToImageFiles(videoFilePath: String, outputFolderPath: String): Map[Int, MatchArea] = {
 
-    getNewBoardsStream(getFrameStream(videoFilePath), getMatchAreas(Size()))
+    val boardsStream: scala.Stream[(Int, BufferedImage, MatchArea)] = getNewBoardsStream(getFrameStream(videoFilePath), getMatchAreas(cardSize))
 
+    boardsStream.map { case(frameNumber, _, ma) => (frameNumber, ma)}.toMap
   }
 
   def findAreaWithChangedPixelColors(frameNumber: Int, firstFramesReferenceAreas: Map[MatchArea, Vector[Color]], image: BufferedImage): Option[MatchArea] = {

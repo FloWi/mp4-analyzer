@@ -4,16 +4,22 @@ import java.awt.Color
 import java.awt.image.BufferedImage
 import java.io.{FileFilter, File}
 import java.net.URL
+import java.nio.file.{Files, Paths}
 import javax.imageio.ImageIO
 
 import akka.actor.ActorSystem
 import akka.testkit.{ImplicitSender, TestKit}
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
 
+import scala.reflect.io.Path
+
 
 class MovieGrabberSpec(_system: ActorSystem) extends TestKit(_system) with ImplicitSender
 with WordSpecLike with Matchers with BeforeAndAfterAll {
   val cardSize: Size = Size(64, 114)
+
+  val userHome: String = new File(System.getProperty("user.home")).getAbsolutePath
+  val videoFilePath: String = Paths.get(userHome, "ownCloud/douglas/82k_threes.mp4").toString
 
   def this() = this(ActorSystem("MySpec"))
 
@@ -25,9 +31,9 @@ with WordSpecLike with Matchers with BeforeAndAfterAll {
     "be deconstructed in frames properly" in {
 
       //val videoFilePath: String = "/home/flwi/Downloads/Short video clip-nature.mp4-SD.mp4"
-      val videoFilePath: String = "/home/flwi/ownCloud/douglas/82k_threes.mp4"
+      val tempDir: String = Files.createTempDirectory(Paths.get("/tmp"), "threes-capture-run").toString
 
-      val framesWithMovement: Map[Int, MatchArea] = Mp4Analyzer.analyzeAndWriteToImageFiles(videoFilePath, "/home/flwi/Pictures/threes-capture/secondRun/")
+      val framesWithMovement: Map[Int, MatchArea] = Mp4Analyzer.analyzeAndWriteToImageFiles(videoFilePath, tempDir)
 
       val frameNumbersWithMovement = framesWithMovement.keys.toList.sorted.mkString(", ")
       val frameNumbersToGrab = framesWithMovement.keys.toList.map(_+Mp4Analyzer.frameOffset).sorted.mkString(", ")
@@ -80,22 +86,26 @@ with WordSpecLike with Matchers with BeforeAndAfterAll {
       val referenceImageInformation = Mp4Analyzer.getColorInformationOfMatchAreas(matchAreas, referenceImage)
 
       val allMatchAreasImage = ImageIO.read(new File(getClass.getResource(filename).getFile))
+      val tempDir: String = Files.createTempDirectory(Paths.get("/tmp"), "threes-capture-run").toString
+
 
       val coloredMatchAreas: Map[MatchArea, BufferedImage] = referenceImageInformation.map { case (ma, _) =>
         val imageForThisMa = ImageIO.read(new File(getClass.getResource(filename).getFile))
         ma.area.coordinates.foreach(coord => allMatchAreasImage.setRGB(coord.x, coord.y, Color.gray.getRGB))
         ma.area.coordinates.foreach(coord => imageForThisMa.setRGB(coord.x, coord.y, Color.gray.getRGB))
-        ImageIO.write(allMatchAreasImage, "png", new File(s"/tmp/matchArea-from-${ma.direction}-index-${ma.index}.png"))
+        val imagePath = Paths.get(tempDir, s"matchArea-from-${ma.direction}-index-${ma.index}.png").toUri
+        ImageIO.write(allMatchAreasImage, "png", new File(imagePath))
         (ma, imageForThisMa)
       }
 
-      ImageIO.write(allMatchAreasImage, "png", new File(s"/tmp/all-matchAreas.png"))
+      val imagePath = Paths.get(tempDir, "all-matchAreas.png").toUri
+      ImageIO.write(allMatchAreasImage, "png", new File(imagePath))
     }
   }
 
   "A stream" must {
     "be constructed properly" in {
-      val framesStream: Stream[(Int, BufferedImage)] = Mp4Analyzer.getFrameStream("/home/flwi/ownCloud/douglas/82k_threes.mp4")
+      val framesStream: Stream[(Int, BufferedImage)] = Mp4Analyzer.getFrameStream(videoFilePath)
       
       val framesWithMovementsStream = Mp4Analyzer.getNewBoardsStream(framesStream, Mp4Analyzer.getMatchAreas(cardSize))
 
