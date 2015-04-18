@@ -110,9 +110,9 @@ with WordSpecLike with Matchers with BeforeAndAfterAll {
       val framesWithMovementsStream = Mp4Analyzer.getNewBoardsStream(framesStream, Mp4Analyzer.getMatchAreas(cardSize))
 
       val take: List[(Int, BufferedImage, MatchArea)] = framesWithMovementsStream.take(10).toList
-      val ints: List[Int] = take.map(_._1)
+      val frameNumbers: List[Int] = take.map(_._1)
 
-      assert(ints == 0.to(10).toList)
+      assert(frameNumbers == List(127, 220, 259, 286, 307, 325, 343, 472, 532, 574))
     }
   }
 }
